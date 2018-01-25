@@ -2,6 +2,8 @@ use std::path::Path;
 use std::fs;
 use std::env;
 
+extern crate notify;
+
 fn main() {
     let args: env::Args = env::args();
     let args: Vec<String> = args.collect();
