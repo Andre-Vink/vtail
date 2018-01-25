@@ -1,0 +1,6 @@
+[package]
+name = "ptail"
+version = "0.1.0"
+authors = ["andre"]
+
+[dependencies]
