@@ -1,30 +1,30 @@
-use std::path::Path;
-use std::fs;
-use std::env;
-
 extern crate notify;
 
+use notify::{Watcher, RecursiveMode, RawEvent, raw_watcher};
+use notify::op::WRITE;
+use std::sync::mpsc::channel;
+use std::path::PathBuf;
+
 fn main() {
-    let args: env::Args = env::args();
-    let args: Vec<String> = args.collect();
+    // Create a channel to receive the events.
+    let (tx, rx) = channel();
 
-    if args.len() < 2 {
-        panic!("USAGE: ptail <extension>. EXAMPLE: ptail txt");
-    }
+    // Create a watcher object, delivering raw events.
+    // The notification back-end is selected based on the platform.
+    let mut watcher = raw_watcher(tx).unwrap();
 
-    let extension: &str = &args[1];
+    // Add a path to be watched. All files and directories at that path and
+    // below will be monitored for changes.
+    watcher.watch(".", RecursiveMode::Recursive).unwrap();
 
-    println!("PTailing files ending with {}...", extension);
-
-    let path: &Path = Path::new(".");
-    println!("Path = {:?}", path);
-
-    let cur_dir: fs::ReadDir = fs::read_dir(path).expect("Cannot read current directory");
-    println!("CurDir = {:?}", cur_dir);
-
-    for entry in cur_dir {
-        if let Ok(entry) = entry {
-            println!("Entry {:?}", entry.path());
+    loop {
+        match rx.recv() {
+            Ok(RawEvent{path: Some(path), op: Ok(WRITE), ..}) => echo_file(path),
+            _ => {}
         }
     }
+}
+
+fn echo_file(path_buf: PathBuf) {
+    println!("WRITE to {:?}", path_buf);
 }
