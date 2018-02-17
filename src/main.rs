@@ -1,4 +1,5 @@
 extern crate notify;
+extern crate core;
 
 use notify::{Watcher, RecursiveMode, RawEvent, raw_watcher};
 use notify::op::WRITE;
@@ -9,28 +10,30 @@ use std::path::Path;
 use std::fs;
 
 use std::collections::HashMap;
+use core::cmp::Ordering;
 
 fn main() {
     let mut file_map = HashMap::new();
 
     let args: Vec<String> = env::args().collect();
-    let dir_to_watch = if args.len() < 2 { "." } else { args.get(1).unwrap() };
-    println!("Tailing files in directory [{}]...", dir_to_watch);
+    let path_to_watch =
+        if args.len() < 2 { env::current_dir().unwrap() } else { PathBuf::from(args[1].clone()) };
 
-    let p = Path::new(dir_to_watch);
-    let rd = fs::read_dir(p);
+    println!("Tailing files in directory [{:?}]...", path_to_watch);
+
+    let rd = fs::read_dir(&path_to_watch);
     match rd {
         Ok(rd) => read_directory(&mut file_map, rd),
         Err(err) => println!("Dir no good: {:?}", err),
     }
 
     // start tailing
-    tail(&mut file_map);
+    tail(&mut file_map, &path_to_watch);
 
     println!("Tailing ended.");
 }
 
-fn tail(file_map: &mut HashMap<String, u64>) {
+fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &PathBuf) {
     // Create a channel to receive the events.
     let (tx, rx) = channel();
 
@@ -44,8 +47,8 @@ fn tail(file_map: &mut HashMap<String, u64>) {
 
     loop {
         match rx.recv() {
-            Ok(RawEvent{path: Some(path), op: Ok(WRITE), ..}) => echo_file(path),
-            _ => {}
+            Ok(RawEvent{path: Some(path), op: Ok(WRITE), ..}) => echo_file(file_map, path, path_to_watch),
+            _ => {},
         }
     }
 }
@@ -81,9 +84,20 @@ fn process_file(file_map: &mut HashMap<String, u64>, p: &Path) {
     file_map.insert(name, length);
 }
 
-fn echo_file(path_buf: PathBuf) {
-    let pb = path_buf.canonicalize().expect("Cannot get full absolute path.");
-    let name = String::from(pb.to_str().expect("Cannot get file name from path."));
+fn echo_file(file_map: &mut HashMap<String, u64>, path_buf: PathBuf, path_to_watch: &PathBuf) {
+    let parent_path = path_buf.parent().unwrap().to_path_buf();
+//    println!("path_to_watch=[{:?}], parent_path=[{:?}]", path_to_watch, parent_path);
+    match path_to_watch.cmp(&parent_path) {
+        Ordering::Equal => {
+            let pb = path_buf.canonicalize().expect("Cannot get full absolute path.");
+            let name = String::from(pb.to_str().expect("Cannot get file name from path."));
 
-    println!("WRITE to {:?} name = {}", path_buf, name);
+            println!("WRITE to {:?} name = {}", path_buf, name);
+            match file_map.get("jan") {
+                Some(fp) => println!("File pointer for file [{:?}] is [{}].", path_buf, fp),
+                None => println!("File [{:?}] is new, echo complete file.", path_buf),
+            }
+        },
+        _ => (),
+    }
 }
