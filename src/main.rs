@@ -8,17 +8,23 @@ use std::path::PathBuf;
 use std::env;
 use std::path::Path;
 use std::fs;
-
+use std::fs::File;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::collections::HashMap;
 use core::cmp::Ordering;
 
+///
+/// Usage: one or no arguments to specify a directory to watch or use the current directory.
+///
+/// Does not cope with rewriting files (so their size is reduced).
+///
 fn main() {
-    let mut file_map = HashMap::new();
+    let mut file_map: HashMap<String, u64> = HashMap::new();
 
-    let args: Vec<String> = env::args().collect();
-    let path_to_watch =
-        if args.len() < 2 { env::current_dir().unwrap() } else { PathBuf::from(args[1].clone()) };
-
+    let path_to_watch: PathBuf = get_path_to_watch();
+    let path_to_watch: &Path = path_to_watch.as_path();
     println!("Tailing files in directory [{:?}]...", path_to_watch);
 
     let rd = fs::read_dir(&path_to_watch);
@@ -33,7 +39,17 @@ fn main() {
     println!("Tailing ended.");
 }
 
-fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &PathBuf) {
+fn get_path_to_watch() -> PathBuf {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        env::current_dir().unwrap()
+    } else {
+        let pb = PathBuf::from(&args[1]);
+        env::current_dir().unwrap().join(pb)
+    }
+}
+
+fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &Path) {
     // Create a channel to receive the events.
     let (tx, rx) = channel();
 
@@ -43,11 +59,12 @@ fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &PathBuf) {
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
-    watcher.watch(".", RecursiveMode::Recursive).unwrap();
+    watcher.watch(path_to_watch, RecursiveMode::Recursive).unwrap();
 
     loop {
         match rx.recv() {
-            Ok(RawEvent{path: Some(path), op: Ok(WRITE), ..}) => echo_file(file_map, path, path_to_watch),
+            Ok(RawEvent{path: Some(file), op: Ok(WRITE), ..}) =>
+                echo_file(file_map, file.as_path(), path_to_watch),
             _ => {},
         }
     }
@@ -73,31 +90,47 @@ fn process_entry(file_map: &mut HashMap<String, u64>, de: fs::DirEntry) {
 }
 
 fn process_file(file_map: &mut HashMap<String, u64>, p: &Path) {
-    let pb = p.canonicalize().expect("Cannot get full absolute path.");
-    let name = String::from(pb.to_str().expect("Cannot get file name from path."));
-
+    let name = String::from(p.to_str().expect("Cannot get file name from path."));
     let meta = p.metadata().expect("Cannnot get file length from path.");
     let length = meta.len();
 
-    println!("File  = [{}]=[{}]", name, length);
+//    println!("File  = [{}]=[{}]", name, length);
 
     file_map.insert(name, length);
 }
 
-fn echo_file(file_map: &mut HashMap<String, u64>, path_buf: PathBuf, path_to_watch: &PathBuf) {
-    let parent_path = path_buf.parent().unwrap().to_path_buf();
+fn echo_file(file_map: &mut HashMap<String, u64>, file: &Path, path_to_watch: &Path) {
+    let parent_path = file.parent().unwrap().to_path_buf();
 //    println!("path_to_watch=[{:?}], parent_path=[{:?}]", path_to_watch, parent_path);
     match path_to_watch.cmp(&parent_path) {
         Ordering::Equal => {
-            let pb = path_buf.canonicalize().expect("Cannot get full absolute path.");
-            let name = String::from(pb.to_str().expect("Cannot get file name from path."));
+            let name = String::from(file.to_str().expect("Cannot get file name from path."));
 
-            println!("WRITE to {:?} name = {}", path_buf, name);
-            match file_map.get("jan") {
-                Some(fp) => println!("File pointer for file [{:?}] is [{}].", path_buf, fp),
-                None => println!("File [{:?}] is new, echo complete file.", path_buf),
+//            println!("WRITE to {:?} name = {}", file, name);
+            match file_map.get(&name) {
+                Some(fp) => {
+                    echo_file_from(&name, *fp);
+                },
+                None => {
+                    echo_whole_file(&name);
+                },
             }
+            process_file(file_map, file);
         },
         _ => (),
     }
+}
+
+fn echo_whole_file(file_name: &String) {
+//    println!("File [{:?}] is new, echo complete file.", file_name);
+    echo_file_from(file_name, 0);
+}
+
+fn echo_file_from(file_name: &String, fp: u64) {
+//    println!("File pointer for file [{:?}] is [{}].", file_name, fp);
+    let mut file = File::open(file_name).expect("Could not open file for reading.");
+    file.seek(SeekFrom::Start(fp)).expect("Could no seek in open file.");
+    let mut content = String::new();
+    file.read_to_string(&mut content).expect("Could not read file.");
+    print!("{}", content);
 }
