@@ -128,9 +128,17 @@ fn echo_whole_file(file_name: &String) {
 
 fn echo_file_from(file_name: &String, fp: u64) {
 //    println!("File pointer for file [{:?}] is [{}].", file_name, fp);
-    let mut file = File::open(file_name).expect("Could not open file for reading.");
-    file.seek(SeekFrom::Start(fp)).expect("Could no seek in open file.");
-    let mut content = String::new();
-    file.read_to_string(&mut content).expect("Could not read file.");
-    print!("{}", content);
+    let file_result = File::open(file_name);
+    match file_result {
+        Ok(mut file) => {
+            file.seek(SeekFrom::Start(fp))
+                .expect(&format!("Could no seek in open file [{}].", file_name));
+            let mut content = String::new();
+            file.read_to_string(&mut content)
+                .expect(&format!("Could not read file [{}].", file_name));
+            print!("{}", content);
+
+        },
+        Err(x) => println!("PTAIL ERROR => Could not open file [{}] for reading: error = [{}].", file_name, x),
+    }
 }
