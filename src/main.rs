@@ -1,58 +1,84 @@
 extern crate notify;
 extern crate core;
 
-use notify::{Watcher, RecursiveMode, RawEvent, raw_watcher};
-use notify::op::WRITE;
+use notify::{Watcher, RecursiveMode, DebouncedEvent, watcher};
 use std::sync::mpsc::channel;
 use std::path::PathBuf;
 use std::env;
 use std::path::Path;
 use std::fs;
 use std::fs::File;
-use std::io;
+//use std::io;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::collections::HashMap;
 use core::cmp::Ordering;
+use std::time::Duration;
 
 ///
-/// Usage: one or no arguments to specify a directory to watch or use the current directory.
+/// Usage: ptail [-r] [<directory to watch>]
+/// -r:                 to watch subdirectories as well,
+/// directory to watch: the directory (with optional subdirectories) to watch for changes.
 ///
 /// Does not cope with rewriting files (so their size is reduced).
+/// But handles file renaming and removing.
 ///
+
+#[derive(Debug)]
+struct Arguments {
+    recursive: bool,
+    path_to_watch: PathBuf,
+}
+
 fn main() {
     let mut file_map: HashMap<String, u64> = HashMap::new();
 
-    match get_path_to_watch() {
-        Err(e) => eprintln!("Cannot access current directory. Error: [{}]", e),
-        Ok(path_to_watch) => {
-            let path_to_watch: &Path = path_to_watch.as_path();
-            println!("Tailing files in directory [{:?}]...", path_to_watch);
+    let args: Arguments = parse_arguments();
+//    println!("Parsed arguments: {:?}", args);
 
-            match fs::read_dir(&path_to_watch) {
-                Ok(rd) => read_directory(&mut file_map, rd),
-                Err(err) => eprintln!("Dir no good: {:?}", err),
-            }
-
-            // start tailing
-            tail(&mut file_map, &path_to_watch);
-
-            println!("Tailing ended.");
-        }
+    let path_to_watch;
+    if let Ok(normalized_path) = args.path_to_watch.canonicalize() {
+        path_to_watch = normalized_path;
+    } else {
+        path_to_watch = args.path_to_watch;
     }
+    println!("Tailing files in directory [{:?}]...", path_to_watch);
+
+    match fs::read_dir(&path_to_watch) {
+        Ok(rd) => read_directory(&mut file_map, rd),
+        Err(err) => eprintln!("Dir no good: {:?}", err),
+    }
+
+    // start tailing
+    tail(&mut file_map, &path_to_watch);
+
+    println!("Tailing ended.");
 }
 
-fn get_path_to_watch() -> io::Result<PathBuf> {
+fn parse_arguments() -> Arguments {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        env::current_dir()
-    } else {
-        let pb = PathBuf::from(&args[1]);
-        match env::current_dir() {
-            Ok(cd) => Ok(cd.join(pb)),
-            Err(x) => Err(x),
+//    println!("Arguments: [{:?}]", args);
+    let mut usefull_args = &args[1..];
+//    println!("Usefull arguments: [{:?}]", usefull_args);
+
+    let mut recursive = false;
+    // Test for recursive (-r) flag
+    if usefull_args.len() > 0 {
+        recursive = usefull_args[0].eq("-r");
+        if recursive {
+            usefull_args = &usefull_args[1..];
+//            println!("Usefull arguments 2: [{:?}]", usefull_args);
         }
+    }
+
+    // Only one path supported at this time
+    let cur_dir = env::current_dir().unwrap();
+    if usefull_args.len() > 0 {
+        let absolute_path = cur_dir.join(&usefull_args[0]);
+        Arguments { recursive: recursive, path_to_watch: absolute_path }
+    } else {
+        Arguments { recursive: recursive, path_to_watch: cur_dir }
     }
 }
 
@@ -60,17 +86,33 @@ fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &Path) {
     // Create a channel to receive the events.
     let (tx, rx) = channel();
 
-    // Create a watcher object, delivering raw events.
+    // Create a watcher object, delivering debounced events.
     // The notification back-end is selected based on the platform.
-    let mut watcher = raw_watcher(tx).unwrap();
+    let mut watcher = watcher(tx, Duration::from_millis(100)).unwrap();
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
     watcher.watch(path_to_watch, RecursiveMode::Recursive).unwrap();
 
     loop {
-        if let Ok(RawEvent{path: Some(file), op: Ok(WRITE), ..}) = rx.recv() {
-            echo_file(file_map, file.as_path(), path_to_watch);
+        let r = rx.recv();
+        if let Ok(event) = r {
+            match event {
+                DebouncedEvent::Create(file) => echo_file(file_map, file.as_path(), path_to_watch),
+                DebouncedEvent::Write(file) => echo_file(file_map, file.as_path(), path_to_watch),
+                DebouncedEvent::Remove(path_buf) => println!("Remove[{:?}]", path_buf),
+                DebouncedEvent::Rename(path_buf_from, path_buf_to) => println!("Rename[{:?}]->[{:?}]", path_buf_from, path_buf_to),
+
+                DebouncedEvent::NoticeWrite(_) => (),
+                DebouncedEvent::NoticeRemove(_) => (),
+                DebouncedEvent::Chmod(_) => (),
+                DebouncedEvent::Rescan => (),
+
+                DebouncedEvent::Error(error, Some(path_buf)) => eprintln!("Error: [{}] for path [{:?}]", error, path_buf),
+                DebouncedEvent::Error(error, None) => eprintln!("Error: [{}]", error),
+            }
+        } else {
+            println!("Event: [{:?}]", r);
         }
     }
 }
@@ -113,7 +155,7 @@ fn process_file(file_map: &mut HashMap<String, u64>, p: &Path) {
 
 fn echo_file(file_map: &mut HashMap<String, u64>, file: &Path, path_to_watch: &Path) {
     let parent_path = file.parent().unwrap().to_path_buf();
-//    println!("path_to_watch=[{:?}], parent_path=[{:?}]", path_to_watch, parent_path);
+//    println!("echo_file file=[{:?}], path_to_watch=[{:?}], parent_path=[{:?}]", file, path_to_watch, parent_path);
 
     // Don't do files in sub folders
     if let Ordering::Equal = path_to_watch.cmp(&parent_path) {
@@ -154,7 +196,6 @@ fn echo_file_from(file_name: &String, fp: u64) {
                 }
             }
         },
-        Err(x) => println!(
-            "PTAIL ERROR => Could not open file [{}] for reading. Error: [{}].", file_name, x),
+        Err(x) => println!("PTAIL ERROR => Could not open file [{}] for reading. Error: [{}].", file_name, x),
     }
 }
