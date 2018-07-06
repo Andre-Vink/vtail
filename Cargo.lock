@@ -150,13 +150,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ptail"
-version = "0.1.0"
-dependencies = [
- "notify 4.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.1.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -182,6 +175,13 @@ dependencies = [
  "libc 0.2.36 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "vtail"
+version = "0.1.0"
+dependencies = [
+ "notify 4.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

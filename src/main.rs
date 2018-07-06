@@ -17,7 +17,7 @@ use core::cmp::Ordering;
 use std::time::Duration;
 
 ///
-/// Usage: ptail [-r] [<directory to watch>]
+/// Usage: vtail [-r] [<directory to watch>]
 /// -r:                 to watch subdirectories as well,
 /// directory to watch: the directory (with optional subdirectories) to watch for changes.
 ///
@@ -196,6 +196,6 @@ fn echo_file_from(file_name: &String, fp: u64) {
                 }
             }
         },
-        Err(x) => println!("PTAIL ERROR => Could not open file [{}] for reading. Error: [{}].", file_name, x),
+        Err(x) => println!("VTAIL ERROR => Could not open file [{}] for reading. Error: [{}].", file_name, x),
     }
 }

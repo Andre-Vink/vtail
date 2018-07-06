@@ -1,7 +1,7 @@
 [package]
-name = "ptail"
+name = "vtail"
 version = "0.1.0"
-authors = ["andre"]
+authors = ["André Vink"]
 
 [dependencies]
 notify = "4.0.3"
