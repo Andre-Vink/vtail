@@ -2,22 +2,22 @@ extern crate notify;
 extern crate core;
 
 use notify::{Watcher, RecursiveMode, DebouncedEvent, watcher};
-use std::sync::mpsc::channel;
-use std::path::PathBuf;
+use std::collections::HashMap;
 use std::env;
-use std::path::Path;
 use std::fs;
 use std::fs::File;
+use std::path::Path;
+use std::path::PathBuf;
 //use std::io;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
-use std::collections::HashMap;
-use core::cmp::Ordering;
+use std::sync::mpsc::channel;
 use std::time::Duration;
+use core::cmp::Ordering;
 
 ///
-/// Usage: vtail [-r] [<directory to watch>]
+/// Usage: vtail [-r] [<directory to watch>] [<directory to watch>] ...
 /// -r:                 to watch subdirectories as well,
 /// directory to watch: the directory (with optional subdirectories) to watch for changes.
 ///
@@ -28,30 +28,33 @@ use std::time::Duration;
 #[derive(Debug)]
 struct Arguments {
     recursive: bool,
-    path_to_watch: PathBuf,
+    paths_to_watch: Vec<PathBuf>,
 }
 
 fn main() {
     let mut file_map: HashMap<String, u64> = HashMap::new();
+    let mut paths_to_watch: Vec<PathBuf> = Vec::new();
 
     let args: Arguments = parse_arguments();
 //    println!("Parsed arguments: {:?}", args);
 
-    let path_to_watch;
-    if let Ok(normalized_path) = args.path_to_watch.canonicalize() {
-        path_to_watch = normalized_path;
-    } else {
-        path_to_watch = args.path_to_watch;
+    for path in args.paths_to_watch.iter() {
+        match path.canonicalize() {
+            Ok(normalized_path) => paths_to_watch.push(normalized_path),
+            _ => paths_to_watch.push(path.clone()),
+        }
     }
-    println!("Tailing files in directory [{:?}]...", path_to_watch);
+    println!("Tailing files in directory [{:?}]...", paths_to_watch);
 
-    match fs::read_dir(&path_to_watch) {
-        Ok(rd) => read_directory(&mut file_map, rd),
-        Err(err) => eprintln!("Dir no good: {:?}", err),
+    for path in paths_to_watch.iter() {
+        match fs::read_dir(path) {
+            Ok(rd) => read_directory(&mut file_map, rd),
+            Err(err) => eprintln!("Dir no good: {:?}", err),
+        }
     }
 
     // start tailing
-    tail(&mut file_map, &path_to_watch);
+    tail(&mut file_map, &paths_to_watch);
 
     println!("Tailing ended.");
 }
@@ -65,24 +68,29 @@ fn parse_arguments() -> Arguments {
     let mut recursive = false;
     // Test for recursive (-r) flag
     if usefull_args.len() > 0 {
-        recursive = usefull_args[0].eq("-r");
+        recursive = usefull_args[0].eq(&String::from("-r"));
         if recursive {
             usefull_args = &usefull_args[1..];
 //            println!("Usefull arguments 2: [{:?}]", usefull_args);
         }
     }
 
-    // Only one path supported at this time
+    // Multiple paths supported
     let cur_dir = env::current_dir().unwrap();
-    if usefull_args.len() > 0 {
-        let absolute_path = cur_dir.join(&usefull_args[0]);
-        Arguments { recursive: recursive, path_to_watch: absolute_path }
+    let mut result: Arguments = Arguments{ recursive, paths_to_watch: Vec::new() };
+    if usefull_args.len() == 0 {
+        result.paths_to_watch.push(cur_dir);
     } else {
-        Arguments { recursive: recursive, path_to_watch: cur_dir }
+        for arg in usefull_args.iter() {
+            let absolute_path = cur_dir.join(arg);
+            result.paths_to_watch.push(absolute_path);
+        }
     }
+    
+    return result;
 }
 
-fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &Path) {
+fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
     // Create a channel to receive the events.
     let (tx, rx) = channel();
 
@@ -92,14 +100,16 @@ fn tail(file_map: &mut HashMap<String, u64>, path_to_watch: &Path) {
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
-    watcher.watch(path_to_watch, RecursiveMode::Recursive).unwrap();
+    for path in paths_to_watch.iter() {
+        watcher.watch(path, RecursiveMode::Recursive).unwrap();
+    }
 
     loop {
         let r = rx.recv();
         if let Ok(event) = r {
             match event {
-                DebouncedEvent::Create(file) => echo_file(file_map, file.as_path(), path_to_watch),
-                DebouncedEvent::Write(file) => echo_file(file_map, file.as_path(), path_to_watch),
+                DebouncedEvent::Create(file) => echo_file(file_map, file.as_path(), paths_to_watch),
+                DebouncedEvent::Write(file) => echo_file(file_map, file.as_path(), paths_to_watch),
                 DebouncedEvent::Remove(path_buf) => println!("Remove[{:?}]", path_buf),
                 DebouncedEvent::Rename(path_buf_from, path_buf_to) => println!("Rename[{:?}]->[{:?}]", path_buf_from, path_buf_to),
 
@@ -153,23 +163,25 @@ fn process_file(file_map: &mut HashMap<String, u64>, p: &Path) {
     }
 }
 
-fn echo_file(file_map: &mut HashMap<String, u64>, file: &Path, path_to_watch: &Path) {
+fn echo_file(file_map: &mut HashMap<String, u64>, file: &Path, paths_to_watch: &Vec<PathBuf>) {
     let parent_path = file.parent().unwrap().to_path_buf();
-//    println!("echo_file file=[{:?}], path_to_watch=[{:?}], parent_path=[{:?}]", file, path_to_watch, parent_path);
+//    println!("echo_file file=[{:?}], paths_to_watch=[{:?}], parent_path=[{:?}]", file, paths_to_watch, parent_path);
 
     // Don't do files in sub folders
-    if let Ordering::Equal = path_to_watch.cmp(&parent_path) {
-        match file.to_str() {
-            None => eprintln!("Cannot get file name from path [{:?}].", file),
-            Some(s) => {
-                let name = String::from(s);
+    for path in paths_to_watch.iter() {
+        if let Ordering::Equal = path.cmp(&parent_path) {
+            match file.to_str() {
+                None => eprintln!("Cannot get file name from path [{:?}].", file),
+                Some(s) => {
+                    let name = String::from(s);
 
-//                    println!("WRITE to {:?} name = {}", file, name);
-                match file_map.get(&name) {
-                    Some(fp) => echo_file_from(&name, *fp),
-                    None     => echo_whole_file(&name),
+                    // println!("WRITE to {:?} name = {}", file, name);
+                    match file_map.get(&name) {
+                        Some(fp) => echo_file_from(&name, *fp),
+                        None => echo_whole_file(&name),
+                    }
+                    process_file(file_map, file);
                 }
-                process_file(file_map, file);
             }
         }
     }
