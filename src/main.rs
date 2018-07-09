@@ -3,7 +3,6 @@ extern crate core;
 
 use notify::{Watcher, RecursiveMode, DebouncedEvent, watcher};
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::fs::File;
 use std::path::Path;
@@ -31,7 +30,7 @@ fn main() {
     let mut file_map: HashMap<String, u64> = HashMap::new();
     let mut paths_to_watch: Vec<PathBuf> = Vec::new();
 
-    let args: Arguments = parse_arguments();
+    let args: Arguments = Arguments::parse_arguments();
 //    println!("Parsed arguments: {:?}", args);
 
     for path in args.get_paths().iter() {
@@ -53,37 +52,6 @@ fn main() {
     tail(&mut file_map, &paths_to_watch);
 
     println!("Tailing ended.");
-}
-
-fn parse_arguments() -> Arguments {
-    let args: Vec<String> = env::args().collect();
-//    println!("Arguments: [{:?}]", args);
-    let mut usefull_args = &args[1..];
-//    println!("Usefull arguments: [{:?}]", usefull_args);
-
-    let mut recursive = false;
-    // Test for recursive (-r) flag
-    if usefull_args.len() > 0 {
-        recursive = usefull_args[0].eq(&String::from("-r"));
-        if recursive {
-            usefull_args = &usefull_args[1..];
-//            println!("Usefull arguments 2: [{:?}]", usefull_args);
-        }
-    }
-
-    // Multiple paths supported
-    let cur_dir = env::current_dir().unwrap();
-    let mut result: Arguments = Arguments::new(recursive, Vec::new() );
-    if usefull_args.len() == 0 {
-        result.add_path(cur_dir);
-    } else {
-        for arg in usefull_args.iter() {
-            let absolute_path = cur_dir.join(arg);
-            result.add_path(absolute_path);
-        }
-    }
-    
-    return result;
 }
 
 fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
