@@ -8,7 +8,6 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
-//use std::io;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -16,20 +15,17 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 use core::cmp::Ordering;
 
+mod arguments;
+use arguments::Arguments;
+
 ///
 /// Usage: vtail [-r] [<directory to watch>] [<directory to watch>] ...
 /// -r:                 to watch subdirectories as well,
-/// directory to watch: the directory (with optional subdirectories) to watch for changes.
+/// directory to watch: the directories (with optional subdirectories) to watch for changes.
 ///
 /// Does not cope with rewriting files (so their size is reduced).
 /// But handles file renaming and removing.
 ///
-
-#[derive(Debug)]
-struct Arguments {
-    recursive: bool,
-    paths_to_watch: Vec<PathBuf>,
-}
 
 fn main() {
     let mut file_map: HashMap<String, u64> = HashMap::new();
@@ -38,7 +34,7 @@ fn main() {
     let args: Arguments = parse_arguments();
 //    println!("Parsed arguments: {:?}", args);
 
-    for path in args.paths_to_watch.iter() {
+    for path in args.get_paths().iter() {
         match path.canonicalize() {
             Ok(normalized_path) => paths_to_watch.push(normalized_path),
             _ => paths_to_watch.push(path.clone()),
@@ -77,13 +73,13 @@ fn parse_arguments() -> Arguments {
 
     // Multiple paths supported
     let cur_dir = env::current_dir().unwrap();
-    let mut result: Arguments = Arguments{ recursive, paths_to_watch: Vec::new() };
+    let mut result: Arguments = Arguments::new(recursive, Vec::new() );
     if usefull_args.len() == 0 {
-        result.paths_to_watch.push(cur_dir);
+        result.add_path(cur_dir);
     } else {
         for arg in usefull_args.iter() {
             let absolute_path = cur_dir.join(arg);
-            result.paths_to_watch.push(absolute_path);
+            result.add_path(absolute_path);
         }
     }
     
