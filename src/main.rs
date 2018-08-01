@@ -44,7 +44,7 @@ fn main() {
     for path in paths_to_watch.iter() {
         match fs::read_dir(path) {
             Ok(rd) => read_directory(&mut file_map, rd),
-            Err(err) => eprintln!("Dir no good: {:?}", err),
+            Err(err) => eprintln!("Cannot read directory [{:?}]: {:?}", path, err),
         }
     }
 
@@ -74,16 +74,20 @@ fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
             match event {
                 DebouncedEvent::Create(file) => echo_file(file_map, file.as_path(), paths_to_watch),
                 DebouncedEvent::Write(file) => echo_file(file_map, file.as_path(), paths_to_watch),
-                DebouncedEvent::Remove(path_buf) => println!("Remove[{:?}]", path_buf),
-                DebouncedEvent::Rename(path_buf_from, path_buf_to) => println!("Rename[{:?}]->[{:?}]", path_buf_from, path_buf_to),
+
+//                DebouncedEvent::Remove(path_buf) => println!("Remove[{:?}]", path_buf),
+//                DebouncedEvent::Rename(path_buf_from, path_buf_to) => println!("Rename[{:?}]->[{:?}]", path_buf_from, path_buf_to),
+                DebouncedEvent::Remove(_) => (),
+                DebouncedEvent::Rename(_, _) => (),
 
                 DebouncedEvent::NoticeWrite(_) => (),
                 DebouncedEvent::NoticeRemove(_) => (),
                 DebouncedEvent::Chmod(_) => (),
                 DebouncedEvent::Rescan => (),
 
-                DebouncedEvent::Error(error, Some(path_buf)) => eprintln!("Error: [{}] for path [{:?}]", error, path_buf),
-                DebouncedEvent::Error(error, None) => eprintln!("Error: [{}]", error),
+//                DebouncedEvent::Error(error, Some(path_buf)) => eprintln!("Error: [{}] for path [{:?}]", error, path_buf),
+//                DebouncedEvent::Error(error, None) => eprintln!("Error: [{}]", error),
+                DebouncedEvent::Error(_, _) => (),
             }
         } else {
             println!("Event: [{:?}]", r);
@@ -167,7 +171,12 @@ fn echo_file_from(file_name: &String, fp: u64) {
                     let mut content = String::new();
                     match file.read_to_string(&mut content) {
                         Err(e) => eprintln!("Could not read file [{}]. Error: [{}]", file_name, e),
-                        Ok(_) => print!("{}", content),
+                        Ok(_) => {
+                            let path = Path::new(file_name);
+                            let parent = path.parent().unwrap();
+                            let file_name = parent.file_name().unwrap();
+                            print!("{:?}: {}", file_name, content)
+                        },
                     }
                 }
             }
