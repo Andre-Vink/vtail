@@ -174,8 +174,9 @@ fn echo_file_from(file_name: &String, fp: u64) {
                         Ok(_) => {
                             let path = Path::new(file_name);
                             let parent = path.parent().unwrap();
-                            let file_name = parent.file_name().unwrap();
-                            print!("{:?}: {}", file_name, content)
+                            let file_name_os = parent.file_name().unwrap();
+                            let file_name = file_name_os.to_str().unwrap();
+                            print!("\x1b[1;34m{}\x1b[0m: {}", file_name, content)
                         },
                     }
                 }

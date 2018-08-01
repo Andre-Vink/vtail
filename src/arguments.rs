@@ -48,7 +48,7 @@ impl Arguments {
         &self.paths_to_watch
     }
 
-    pub fn add_path(&mut self, path: PathBuf) {
+    fn add_path(&mut self, path: PathBuf) {
         self.paths_to_watch.push(path);
     }
 
