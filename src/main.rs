@@ -39,19 +39,19 @@ fn main() {
             _ => paths_to_watch.push(path.clone()),
         }
     }
-    println!("Tailing files in directory [{:?}]...", paths_to_watch);
+    println!("VTAIL: Tailing files in directory [{:?}]...", paths_to_watch);
 
     for path in paths_to_watch.iter() {
         match fs::read_dir(path) {
             Ok(rd) => read_directory(&mut file_map, rd),
-            Err(err) => eprintln!("Cannot read directory [{:?}]: {:?}", path, err),
+            Err(err) => eprintln!("VTAIL: Cannot read directory [{:?}]: {:?}", path, err),
         }
     }
 
     // start tailing
     tail(&mut file_map, &paths_to_watch);
 
-    println!("Tailing ended.");
+    println!("VTAIL: Tailing ended.");
 }
 
 fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
@@ -60,7 +60,7 @@ fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
 
     // Create a watcher object, delivering debounced events.
     // The notification back-end is selected based on the platform.
-    let mut watcher = watcher(tx, Duration::from_millis(100)).unwrap();
+    let mut watcher = watcher(tx, Duration::from_millis(5)).unwrap();
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
@@ -90,7 +90,7 @@ fn tail(file_map: &mut HashMap<String, u64>, paths_to_watch: &Vec<PathBuf>) {
                 DebouncedEvent::Error(_, _) => (),
             }
         } else {
-            println!("Event: [{:?}]", r);
+            println!("VTAIL: Event: [{:?}]", r);
         }
     }
 }
@@ -100,7 +100,7 @@ fn read_directory(file_map: &mut HashMap<String, u64>, rd: fs::ReadDir) {
     for entry in rd {
         match entry {
             Ok(de) => process_entry(file_map, de),
-            Err(e) => eprintln!("Cannot read directory. Error: [{}]", e),
+            Err(e) => eprintln!("VTAIL: Cannot read directory. Error: [{}]", e),
         }
     }
 }
@@ -110,23 +110,24 @@ fn process_entry(file_map: &mut HashMap<String, u64>, de: fs::DirEntry) {
     let p = de.path();
     let p = p.as_path();
     if p.is_file() {
-        process_file(file_map, p);
+        match p.metadata() {
+            Err(e) => eprintln!("VTAIL: Cannnot get the length from path [{:?}]. Error: [{}].", p, e),
+            Ok(meta) => {
+                let length = meta.len();
+                process_file(file_map, p, length);
+            }
+
+        }
     }
 }
 
-fn process_file(file_map: &mut HashMap<String, u64>, p: &Path) {
+fn process_file(file_map: &mut HashMap<String, u64>, p: &Path, last_fp: u64) {
     match p.to_str() {
-        None => eprintln!("Cannot get file name from path [{:?}].", p),
+        None => eprintln!("VTAIL: Cannot get file name from path [{:?}].", p),
         Some(s) => {
             let name = String::from(s);
-            match p.metadata() {
-                Err(e) => eprintln!("Cannnot get the length from path [{:?}]. Error: [{}].", p, e),
-                Ok(meta) => {
-                    let length = meta.len();
-//                    println!("File  = [{}]=[{}]", name, length);
-                    file_map.insert(name, length);
-                }
-            }
+//            println!("File  = [{}]=[{}]", name, last_fp);
+            file_map.insert(name, last_fp);
         }
     }
 }
@@ -137,51 +138,73 @@ fn echo_file(file_map: &mut HashMap<String, u64>, file: &Path, paths_to_watch: &
 
     // Don't do files in sub folders
     for path in paths_to_watch.iter() {
-        if let Ordering::Equal = path.cmp(&parent_path) {
+        if Ordering::Equal == path.cmp(&parent_path) {
             match file.to_str() {
-                None => eprintln!("Cannot get file name from path [{:?}].", file),
+                None => eprintln!("VTAIL: Cannot get file name from path [{:?}].", file),
                 Some(s) => {
                     let name = String::from(s);
-
                     // println!("WRITE to {:?} name = {}", file, name);
+
+                    let last_fp;
                     match file_map.get(&name) {
-                        Some(fp) => echo_file_from(&name, *fp),
-                        None => echo_whole_file(&name),
+                        Some(fp) => {
+                            last_fp = echo_file_from(&name, *fp);
+                        },
+                        None => {
+                            last_fp = echo_whole_file(&name);
+                        },
                     }
-                    process_file(file_map, file);
+                    process_file(file_map, file, last_fp);
                 }
             }
         }
     }
 }
 
-fn echo_whole_file(file_name: &String) {
+fn echo_whole_file(file_name: &String) -> u64 {
 //    println!("File [{:?}] is new, echo complete file.", file_name);
-    echo_file_from(file_name, 0);
+    echo_file_from(file_name, 0)
 }
 
-fn echo_file_from(file_name: &String, fp: u64) {
+fn echo_file_from(file_name: &String, fp: u64) -> u64 {
+    let mut last_fp = fp;
 //    println!("File pointer for file [{:?}] is [{}].", file_name, fp);
     let file_result = File::open(file_name);
     match file_result {
         Ok(mut file) => {
             match file.seek(SeekFrom::Start(fp)) {
-                Err(e) => eprintln!("Could no seek in open file [{}]. Error: [{}]", file_name, e),
+                Err(e) => eprintln!("VTAIL: Could no seek in open file [{}]. Error: [{}]", file_name, e),
                 Ok(_) => {
                     let mut content = String::new();
                     match file.read_to_string(&mut content) {
-                        Err(e) => eprintln!("Could not read file [{}]. Error: [{}]", file_name, e),
+                        Err(e) => eprintln!("VTAIL: Could not read file [{}]. Error: [{}]", file_name, e),
                         Ok(_) => {
                             let path = Path::new(file_name);
                             let parent = path.parent().unwrap();
                             let file_name_os = parent.file_name().unwrap();
                             let file_name = file_name_os.to_str().unwrap();
-                            print!("\x1b[1;34m{}\x1b[0m: {}", file_name, content)
+
+                            let mut remaining_content = &content[..];
+                            while let Some(next_newline) = remaining_content.find('\n') {
+                                let line = &remaining_content[..next_newline];
+                                let mut rest = &remaining_content[next_newline..];
+
+                                // skip the newline
+                                if rest.len() > 0 {
+                                    rest = &rest[1..];
+                                }
+//                                println!("File: {}, Line: {}, Remaining: {}", file_name, line, rest);
+                                println!("\x1b[1;34m{}\x1b[0m: {}", file_name, line);
+                                last_fp = last_fp + (line.len() as u64) + 1;
+                                remaining_content = rest;
+                            }
                         },
                     }
                 }
             }
         },
-        Err(x) => println!("VTAIL ERROR => Could not open file [{}] for reading. Error: [{}].", file_name, x),
+        Err(x) => eprintln!("VTAIL: Could not open file [{}] for reading. Error: [{}].", file_name, x),
     }
+
+    last_fp
 }
