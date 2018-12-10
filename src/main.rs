@@ -1,6 +1,3 @@
-extern crate notify;
-extern crate core;
-
 use notify::{Watcher, RecursiveMode, DebouncedEvent, watcher};
 use std::collections::HashMap;
 use std::fs;
@@ -15,7 +12,7 @@ use std::time::Duration;
 use core::cmp::Ordering;
 
 mod arguments;
-use arguments::Arguments;
+use crate::arguments::Arguments;
 
 ///
 /// Usage: vtail [-r] [<directory to watch>] [<directory to watch>] ...
